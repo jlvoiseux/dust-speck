@@ -6,8 +6,6 @@ cd "C:\Program Files\Blender Foundation\Blender 3.4\3.4\python\bin"
 ```
 
 TODO
-- Vectorized multiplications
-- Humidity and elevation
-- Seamless noise
 - Export to file
 - Small UI
+- Np noise
