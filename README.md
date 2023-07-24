@@ -6,6 +6,7 @@ cd "C:\Program Files\Blender Foundation\Blender 3.4\3.4\python\bin"
 ```
 
 TODO
-- Export to file
-- Small UI
-- Np noise
+- UI: Import or generate noise
+- UI: Tweak generated planet
+- UI: export final result to file
+- UI allow for purge
