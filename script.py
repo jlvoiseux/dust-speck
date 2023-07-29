@@ -93,14 +93,8 @@ def noise_to_image(noise_texture, texture_size):
     return image
 
 
-def generate_normal_map(elevation_map, texture_size):
-    bpy.context.scene.render.engine = 'CYCLES'
-    bpy.ops.mesh.primitive_plane_add(size=2)
-    plane = bpy.context.active_object
-    bpy.ops.object.material_slot_add()
-    plane.material_slots[0].material = bpy.data.materials.new(name="NormalMaterial")
-    
-    mat = plane.material_slots[0].material
+def generate_normal_material(): 
+    mat = bpy.data.materials.new(name="NormalMaterial")
     mat.use_nodes = True
     nodes = mat.node_tree.nodes
     nodes.clear()
@@ -108,27 +102,18 @@ def generate_normal_map(elevation_map, texture_size):
     links.clear()
     
     texture_node = nodes.new(type="ShaderNodeTexImage")
-    texture_node.image = elevation_map
+    texture_node.name = "ImageNode"
     bump_node = nodes.new(type="ShaderNodeBump")
     bsdf_node = nodes.new(type='ShaderNodeBsdfDiffuse')
     output_node = nodes.new(type="ShaderNodeOutputMaterial")
+    normal_output_node = nodes.new(type="ShaderNodeTexImage")
+    normal_output_node.name = "NormalOutput"
     
     links.new(texture_node.outputs["Color"], bump_node.inputs["Normal"])
     links.new(bump_node.outputs["Normal"], output_node.inputs["Displacement"])
     links.new(bsdf_node.outputs["BSDF"], output_node.inputs["Surface"])
-    
-    baked_normal_node = nodes.new(type="ShaderNodeTexImage")
-    baked_normal_node.image = bpy.data.images.new("BakedNormal", width=texture_size, height=texture_size)
-    baked_normal_node.select = True
-    nodes.active = baked_normal_node
-    bpy.ops.object.select_all(action="SELECT")
-    bpy.ops.object.bake(type="NORMAL")
-    bpy.data.objects.remove(plane)
-    bpy.context.scene.render.engine = 'BLENDER_EEVEE'
-    bpy.context.view_layer.objects.active = None
-    bpy.context.view_layer.objects.active = bpy.context.scene.ds_global_properties.sphere
-    
-    return baked_normal_node.image
+
+    return mat
     
 
 def generate_final_material():
@@ -216,6 +201,10 @@ def generate_final_material():
     
     normal_node = nodes.new(type='ShaderNodeNormalMap')
     normal_node.name = 'NormalNodeN'
+
+    # Diffuse output node
+    diffuse_output_node = nodes.new(type='ShaderNodeTexImage')
+    diffuse_output_node.name = 'DiffuseOutput'
     
     bsdf_node = nodes.new(type='ShaderNodeBsdfPrincipled')
     bsdf_node.name = 'PlanetBSDF'
@@ -263,62 +252,63 @@ def generate_final_sphere(size, mat):
     return sphere
     
 
-def set_image_texture(node_name, image):
-    mat = bpy.context.scene.ds_global_properties.sphere_material
+def set_image_texture(mat, node_name, image):
     image_texture_node = next((node for node in mat.node_tree.nodes if node.type == 'TEX_IMAGE' and node.name == node_name), None)
     if image_texture_node:
         image_texture_node.image = image
-        
-        
-def save_color_map_to_file():
-    mat = bpy.context.scene.ds_global_properties.sphere_material
-    size = bpy.context.scene.ds_global_properties.e_tex_size
-    nodes = mat.node_tree.nodes
-    links = mat.node_tree.links
-    cloud_mix_node = next((node for node in nodes if node.type == 'MIX_RGB' and node.name == 'CloudMix'), None)
-    #links.new(cloud_mix_node.outputs['Color'], output_node.inputs['Surface'])
-    output_image = cloud_mix_node.outputs[0].pixels
-    image = bpy.data.images.new(name="test.png", width=size, height=size)
-    image.pixels = output_image[:]
-    image.file_fprmat = 'PNG'
-    image.filepath_raw = "C:\\Users\\Jean-Louis\\Desktop\\test.png"
-    image.save()
 
-    #links.new(bsdf_node.outputs['BSDF'], output_node.inputs['Surface'])
-    # Doable, you just have to bake to an image texture and then save it to a file
-    # Set the image to the desired resolution
-    # Might want to rework baking with normal maps as well
+
+def bake_mat_to_image(name, mat, target_node, texture_size, bake_type):
+    bpy.context.scene.render.engine = 'CYCLES'
+    bpy.ops.mesh.primitive_plane_add(size=2)
+    plane = bpy.context.active_object
+    bpy.ops.object.material_slot_add()
+    plane.material_slots[0].material = mat
+
+    nodes = mat.node_tree.nodes
+    baked_normal_node = target_node
+    baked_normal_node.image = bpy.data.images.new(name, width=texture_size, height=texture_size)
+    baked_normal_node.select = True
+    nodes.active = baked_normal_node
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.ops.object.bake(type=bake_type)
+    bpy.data.objects.remove(plane)
+    bpy.context.scene.render.engine = 'BLENDER_EEVEE'
+    bpy.context.view_layer.objects.active = None
+    bpy.context.view_layer.objects.active = bpy.context.scene.ds_global_properties.sphere
+    
+    return baked_normal_node.image
         
 
 # UI       
 class DS_GlobalProperties(bpy.types.PropertyGroup):
     def toggle_elevation_callback(self, context):
         scene = context.scene
-        if scene.ds_enable_elevation:
-            if context.scene.ds_global_properties.elevation_map != None and context.scene.ds_global_properties.normal_map != None:
-                set_image_texture("ElevationNode", context.scene.ds_global_properties.elevation_map)
-                set_image_texture("NormalNode", context.scene.ds_global_properties.normal_map)
+        if scene.ds_global_properties.enable_elevation:
+            if scene.ds_global_properties.elevation_map != None and scene.ds_global_properties.normal_map != None:
+                set_image_texture(scene.ds_global_properties.sphere_material, "ElevationNode", scene.ds_global_properties.elevation_map)
+                set_image_texture(scene.ds_global_properties.sphere_material, "NormalNode", scene.ds_global_properties.normal_map)
         else:
-            set_image_texture("ElevationNode", None)
-            set_image_texture("NormalNode", None)
+            set_image_texture(scene.ds_global_properties.sphere_material, "ElevationNode", None)
+            set_image_texture(scene.ds_global_properties.sphere_material, "NormalNode", None)
         
         
     def toggle_humidity_callback(self, context):
         scene = context.scene
-        if scene.ds_enable_humidity:
-            if context.scene.ds_global_properties.humidity_map != None:
-                set_image_texture("HumidityNode", context.scene.ds_global_properties.humidity_map)
+        if scene.ds_global_properties.enable_humidity:
+            if scene.ds_global_properties.humidity_map != None:
+                set_image_texture(scene.ds_global_properties.sphere_material, "HumidityNode", scene.ds_global_properties.humidity_map)
         else:
-            set_image_texture("HumidityNode", None)
+            set_image_texture(scene.ds_global_properties.sphere_material, "HumidityNode", None)
             
             
     def toggle_cloud_callback(self, context):
         scene = context.scene
-        if scene.ds_enable_cloud:
-            if context.scene.ds_global_properties.cloud_map != None:
-                set_image_texture("CloudNode", context.scene.ds_global_properties.cloud_map)
+        if scene.ds_global_properties.enable_cloud:
+            if scene.ds_global_properties.cloud_map != None:
+                set_image_texture(scene.ds_global_properties.sphere_material, "CloudNode", scene.ds_global_properties.cloud_map)
         else:
-            set_image_texture("CloudNode", None)
+            set_image_texture(scene.ds_global_properties.sphere_material, "CloudNode", None)
         
         
     state: bpy.props.IntProperty(default=0)
@@ -328,6 +318,7 @@ class DS_GlobalProperties(bpy.types.PropertyGroup):
     cloud_map: bpy.props.PointerProperty(type=bpy.types.Image)
     sphere: bpy.props.PointerProperty(type=bpy.types.Object) 
     sphere_material: bpy.props.PointerProperty(type=bpy.types.Material) 
+    sphere_normal_material: bpy.props.PointerProperty(type=bpy.types.Material) 
     
     purge_toggle: bpy.props.BoolProperty(name="Purge", default=True)
     planet_details: bpy.props.IntProperty(name="Planet Segments", default=128, min=4, max=1024)
@@ -355,6 +346,9 @@ class DS_GlobalProperties(bpy.types.PropertyGroup):
     c_amplitude: bpy.props.FloatProperty(name="Cloud Amplitude", default=1.0, min=0.0, max=10.0)
     c_lacunarity: bpy.props.FloatProperty(name="Cloud Lacunarity", default=2.0, min=0.0, max=10.0)
     c_persistence: bpy.props.FloatProperty(name="Cloud Persistence", default=0.5, min=0.0, max=1.0)
+
+    export_prefix: bpy.props.StringProperty(name="File Name Prefix", default="")
+    export_folder: bpy.props.StringProperty(name="Export Folder", default="", subtype='DIR_PATH')
 
 
 class DS_Panel(bpy.types.Panel):
@@ -467,30 +461,36 @@ class DS_Panel(bpy.types.Panel):
                     row1.prop(scene.ds_global_properties, "c_lacunarity", text="Lacunarity")
                     row1.prop(scene.ds_global_properties, "c_persistence", text="Persistence")
                     layout.operator(DS_GenerateCloud.bl_idname)
-                if scene.ds_global_properties.cloud_map:
-                        layout.label(text="Edit Cloud Map")
-                        layout.template_color_ramp(c_color_ramp, "color_ramp", expand=True)
+                    if scene.ds_global_properties.cloud_map:
+                            layout.label(text="Edit Cloud Map")
+                            layout.template_color_ramp(c_color_ramp, "color_ramp", expand=True)
                 layout.separator()
                 
-                # Save to file buttons
+                # Export
+                layout.label(text="Export Settings")
+                export_row = layout.row()
+                export_row.operator(DS_ExportMaps.bl_idname)
+                export_row.prop(scene.ds_global_properties, "export_prefix", text="File Name Prefix")
+                layout.prop(scene.ds_global_properties, "export_folder", text="Export Folder")
 
 
 class DS_Initialize(bpy.types.Operator):
     bl_idname = "object.ds_initialize"
-    bl_label = "DS_Initialize"
+    bl_label = "Initialize Dust Speck"
     
     def execute(self, context):
         if(context.scene.ds_global_properties.purge_toggle):
             purge_all()
         context.scene.ds_global_properties.sphere_material = generate_final_material()
+        context.scene.ds_global_properties.sphere_normal_material = generate_normal_material()
         
         if context.scene.ds_global_properties.sphere:
             bpy.data.meshes.remove(context.scene.ds_global_properties.sphere.data, do_unlink=True)
             bpy.data.objects.remove(context.scene.ds_global_properties.sphere, do_unlink=True)
-            
+        
         context.scene.ds_global_properties.sphere = generate_final_sphere(context.scene.ds_global_properties.planet_details, context.scene.ds_global_properties.sphere_material)
         
-        # Set object modeand viewport shading
+        # Set object mode and viewport shading
         bpy.ops.object.mode_set(mode='OBJECT')
         area = next(area for area in bpy.context.screen.areas if area.type == 'VIEW_3D')
         space = next(space for space in area.spaces if space.type == 'VIEW_3D')
@@ -505,16 +505,22 @@ class DS_GenerateElevation(bpy.types.Operator):
     bl_label = "Generate Elevation"
     
     def execute(self, context):
-        texture_size = context.scene.ds_global_properties.e_tex_size
-        elevation_num_octaves = context.scene.ds_global_properties.e_num_octaves
-        elevation_frequency = context.scene.ds_global_properties.e_frequency
-        elevation_amplitude = context.scene.ds_global_properties.e_amplitude
-        elevation_lacunarity = context.scene.ds_global_properties.e_lacunarity
-        elevation_persistence = context.scene.ds_global_properties.e_persistence
-        context.scene.ds_global_properties.elevation_map = generate_fractal_map("elevation", texture_size, elevation_num_octaves, elevation_frequency, elevation_amplitude, elevation_lacunarity, elevation_persistence)
-        context.scene.ds_global_properties.normal_map = generate_normal_map(context.scene.ds_global_properties.elevation_map, texture_size)
-        set_image_texture("ElevationNode", context.scene.ds_global_properties.elevation_map)
-        set_image_texture("NormalNode", context.scene.ds_global_properties.normal_map)
+        scene = context.scene
+        texture_size = scene.ds_global_properties.e_tex_size
+        normal_mat = scene.ds_global_properties.sphere_normal_material
+        final_mat = scene.ds_global_properties.sphere_material
+        elevation_num_octaves = scene.ds_global_properties.e_num_octaves
+        elevation_frequency = scene.ds_global_properties.e_frequency
+        elevation_amplitude = scene.ds_global_properties.e_amplitude
+        elevation_lacunarity = scene.ds_global_properties.e_lacunarity
+        elevation_persistence = scene.ds_global_properties.e_persistence
+
+        scene.ds_global_properties.elevation_map = generate_fractal_map("elevation", texture_size, elevation_num_octaves, elevation_frequency, elevation_amplitude, elevation_lacunarity, elevation_persistence)
+        set_image_texture(normal_mat, "ImageNode", scene.ds_global_properties.elevation_map)
+        normal_map_output_node = next((node for node in normal_mat.node_tree.nodes if node.name == 'NormalOutput'), None)
+        scene.ds_global_properties.normal_map = bake_mat_to_image("NormalMap", normal_mat, normal_map_output_node, scene.ds_global_properties.e_tex_size, 'NORMAL')
+        set_image_texture(final_mat, "ElevationNode", scene.ds_global_properties.elevation_map)
+        set_image_texture(final_mat, "NormalNode", scene.ds_global_properties.normal_map)
         return {'FINISHED'}
     
 
@@ -523,14 +529,15 @@ class DS_GenerateHumidity(bpy.types.Operator):
     bl_label = "Generate Humidity"
     
     def execute(self, context):
-        texture_size = context.scene.ds_global_properties.h_tex_size
-        humidity_num_octaves = context.scene.ds_global_properties.h_num_octaves
-        humidity_frequency = context.scene.ds_global_properties.h_frequency
-        humidity_amplitude = context.scene.ds_global_properties.h_amplitude
-        humidity_lacunarity = context.scene.ds_global_properties.h_lacunarity
-        humidity_persistence = context.scene.ds_global_properties.h_persistence
-        context.scene.ds_global_properties.humidity_map = generate_fractal_map("humidity", texture_size, humidity_num_octaves, humidity_frequency, humidity_amplitude, humidity_lacunarity, humidity_persistence)
-        set_image_texture("HumidityNode", context.scene.ds_global_properties.humidity_map)
+        scene = context.scene
+        texture_size = scene.ds_global_properties.h_tex_size
+        humidity_num_octaves = scene.ds_global_properties.h_num_octaves
+        humidity_frequency = scene.ds_global_properties.h_frequency
+        humidity_amplitude = scene.ds_global_properties.h_amplitude
+        humidity_lacunarity = scene.ds_global_properties.h_lacunarity
+        humidity_persistence = scene.ds_global_properties.h_persistence
+        scene.ds_global_properties.humidity_map = generate_fractal_map("humidity", texture_size, humidity_num_octaves, humidity_frequency, humidity_amplitude, humidity_lacunarity, humidity_persistence)
+        set_image_texture(scene.ds_global_properties.sphere_material, "HumidityNode", scene.ds_global_properties.humidity_map)
         return {'FINISHED'}
 
 
@@ -539,24 +546,67 @@ class DS_GenerateCloud(bpy.types.Operator):
     bl_label = "Generate Cloud"
     
     def execute(self, context):
-        texture_size = context.scene.ds_global_properties.c_tex_size
-        cloud_num_octaves = context.scene.ds_global_properties.c_num_octaves
-        cloud_frequency = context.scene.ds_global_properties.c_frequency
-        cloud_amplitude = context.scene.ds_global_properties.c_amplitude
-        cloud_lacunarity = context.scene.ds_global_properties.c_lacunarity
-        cloud_persistence = context.scene.ds_global_properties.c_persistence
-        context.scene.ds_global_properties.cloud_map = generate_fractal_map("cloud", texture_size, cloud_num_octaves, cloud_frequency, cloud_amplitude, cloud_lacunarity, cloud_persistence)
-        set_image_texture("CloudNode", context.scene.ds_global_properties.cloud_map)
+        scene = context.scene
+        texture_size = scene.ds_global_properties.c_tex_size
+        cloud_num_octaves = scene.ds_global_properties.c_num_octaves
+        cloud_frequency = scene.ds_global_properties.c_frequency
+        cloud_amplitude = scene.ds_global_properties.c_amplitude
+        cloud_lacunarity = scene.ds_global_properties.c_lacunarity
+        cloud_persistence = scene.ds_global_properties.c_persistence
+        scene.ds_global_properties.cloud_map = generate_fractal_map("cloud", texture_size, cloud_num_octaves, cloud_frequency, cloud_amplitude, cloud_lacunarity, cloud_persistence)
+        set_image_texture(scene.ds_global_properties.sphere_material, "CloudNode", scene.ds_global_properties.cloud_map)
+        return {'FINISHED'}
+
+
+class DS_ExportMaps(bpy.types.Operator):
+    bl_idname = "object.ds_export_maps"
+    bl_label = "Export Maps"
+
+    def execute(self, context):
+        scene = context.scene
+        export_folder = scene.ds_global_properties.export_folder
+        export_prefix = scene.ds_global_properties.export_prefix
+        texture_size = scene.ds_global_properties.e_tex_size
+        mat = scene.ds_global_properties.sphere_material
+        export_folder = scene.ds_global_properties.export_folder
+        export_prefix = scene.ds_global_properties.export_prefix
+        if scene.ds_global_properties.enable_elevation and scene.ds_global_properties.elevation_map:
+            diffuse_output_node = next((node for node in mat.node_tree.nodes if node.name == 'DiffuseOutput'), None)
+            normal_output_node = next((node for node in mat.node_tree.nodes if node.name == 'NormalNode'), None)  
+            final_mix_node = next((node for node in mat.node_tree.nodes if node.name == 'CloudMix'), None)
+            bsdf_node = next((node for node in mat.node_tree.nodes if node.name == 'PlanetBSDF'), None)
+            material_output_node = next((node for node in mat.node_tree.nodes if node.name == 'PlanetOutput'), None)
+
+            links = mat.node_tree.links
+            links.new(final_mix_node.outputs['Color'], material_output_node.inputs['Surface'])
+
+            bake_mat_to_image("DiffuseMap", mat, diffuse_output_node, scene.ds_global_properties.e_tex_size, 'COMBINED')
+            if diffuse_output_node.image:
+                output_filepath = f"{export_folder}/{export_prefix}_diffuse_{texture_size}.png"
+                diffuse_output_node.image.save_render(filepath=output_filepath)
+            if normal_output_node.image:   
+                output_filepath = f"{export_folder}/{export_prefix}_normal_{texture_size}.png"
+                normal_output_node.image.save_render(filepath=output_filepath)
+
+            links.new(final_mix_node.outputs['Color'], bsdf_node.inputs['Base Color'])
+            links.new(bsdf_node.outputs['BSDF'], material_output_node.inputs['Surface'])
+
+        else:
+            message = "Please generate an elevation map before attempting to export."
+            print(message)
+            show_message_box(message)
+
         return {'FINISHED'}
 
 
 def register():
     bpy.utils.register_class(DS_GlobalProperties)
+    bpy.utils.register_class(DS_Panel)
     bpy.utils.register_class(DS_Initialize)
     bpy.utils.register_class(DS_GenerateElevation)
     bpy.utils.register_class(DS_GenerateHumidity)
     bpy.utils.register_class(DS_GenerateCloud)
-    bpy.utils.register_class(DS_Panel)
+    bpy.utils.register_class(DS_ExportMaps)
     
     bpy.types.Scene.ds_global_properties = bpy.props.PointerProperty(type=DS_GlobalProperties)
     
@@ -571,8 +621,18 @@ def unregister():
     bpy.utils.unregister_class(DS_GenerateHumidity)
     bpy.utils.unregister_class(DS_GenerateCloud)
     bpy.utils.unregister_class(DS_Panel)
+    bpy.utils.unregister_class(DS_ExportMaps)
     
     del bpy.types.Scene.ds_global_properties
+    
+    
+def show_message_box(message = "", title = "Warning", icon = 'INFO'):
+
+    def draw(self, context):
+        self.layout.label(text=message)
+
+    bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
+
     
 if __name__ == "__main__":
     register()
