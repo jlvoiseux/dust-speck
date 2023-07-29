@@ -368,6 +368,9 @@ class DS_Panel(bpy.types.Panel):
         layout.operator(DS_Initialize.bl_idname)
         layout.separator()
 
+        if bpy.context.scene.ds_global_properties.sphere_material == None:
+            bpy.context.scene.ds_global_properties.state = 0
+
         if scene.ds_global_properties.state == 1:
             obj = bpy.context.active_object
             if obj and obj.active_material and obj.active_material == context.scene.ds_global_properties.sphere_material:
@@ -609,9 +612,6 @@ def register():
     bpy.utils.register_class(DS_ExportMaps)
     
     bpy.types.Scene.ds_global_properties = bpy.props.PointerProperty(type=DS_GlobalProperties)
-    
-    if bpy.context.scene.ds_global_properties.sphere_material == None:
-        bpy.context.scene.ds_global_properties.state = 0
 
 
 def unregister():
