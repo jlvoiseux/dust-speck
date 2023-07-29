@@ -369,7 +369,7 @@ class DS_Panel(bpy.types.Panel):
         layout.separator()
 
 
-        if bpy.context.scene.ds_global_properties.sphere_material != None:
+        if scene.ds_global_properties.sphere_material != None and scene.ds_global_properties.sphere != None:
             obj = bpy.context.active_object
             if obj and obj.active_material and obj.active_material == context.scene.ds_global_properties.sphere_material:
 
@@ -496,7 +496,6 @@ class DS_Initialize(bpy.types.Operator):
         area = next(area for area in bpy.context.screen.areas if area.type == 'VIEW_3D')
         space = next(space for space in area.spaces if space.type == 'VIEW_3D')
         space.shading.type = 'MATERIAL'
-        context.scene.ds_global_properties.state = 1
         return {'FINISHED'}
     
 
