@@ -1,13 +1,3 @@
-bl_info = {
-    "name": "Dust Speck",
-    "blender": (3, 4, 1),
-    "category": "3D View",
-    "location": "View3D > Menu > View > Sidebar",
-    "description": "Procedural planet generation tool",
-    "author": "Jean-Louis Voiseux",
-    "version": (1, 0, 1),
-}
-
 import bpy
 import math
 import numpy as np
